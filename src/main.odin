@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:math/rand"
 import SDL "vendor:sdl2"
 
 
@@ -122,7 +123,7 @@ handle_input :: proc(using game: ^Game) {
 
 	player_shoot :: proc(using game: ^Game) {
 		projectile: Projectile =  {
-			{state.player.position.x + 30, state.player.position.y - 10},
+			{state.player.position.x + state.player.size.x / 2, state.player.position.y - 10},
 			{0, -50},
 			{5, 20},
 			false,
@@ -133,6 +134,10 @@ handle_input :: proc(using game: ^Game) {
 
 update :: proc(using game: ^Game) {
 
+	if state.player.destroy == true {
+		SDL.Quit()
+	}
+
 	state.player.position += state.player.velocity
 
 
@@ -141,7 +146,6 @@ update :: proc(using game: ^Game) {
 		   rect1.x + rect1.w > rect2.x &&
 		   rect1.y < rect2.y + rect2.h &&
 		   rect1.y + rect1.h > rect2.y {
-			fmt.println("Collide")
 			return true
 		}
 
@@ -149,7 +153,32 @@ update :: proc(using game: ^Game) {
 	}
 
 	for projectile in &state.projectiles {
+		if projectile.destroy == true {
+			continue
+		}
 		projectile.position += projectile.velocity
+
+		if projectile.position.y < 0 || projectile.position.y > SCREEN_HEIGHT {
+			projectile.destroy = true
+		}
+
+		if rect_collison(
+			    {
+				   projectile.position.x,
+				   projectile.position.y,
+				   projectile.size.x,
+				   projectile.size.y,
+			   },
+			    {
+				   state.player.position.x,
+				   state.player.position.y,
+				   state.player.size.x,
+				   state.player.size.y,
+			   },
+		   ) {
+			projectile.destroy = true
+			state.player.destroy = true
+		}
 
 		for alien in &state.aliens {
 			if rect_collison(
@@ -167,10 +196,27 @@ update :: proc(using game: ^Game) {
 		}
 	}
 
+	alien_shoot :: proc(using game: ^Game, alien: Alien) {
+		projectile: Projectile =  {
+			{alien.position.x + alien.size.x / 2, alien.position.y + 10},
+			{0, 50},
+			{5, 20},
+			false,
+		}
+		append(&state.projectiles, projectile)
+	}
+
+
+	for alien in &state.aliens {
+		if rand.float32() < 0.025 {
+			alien_shoot(game, alien)
+		}
+	}
+
 	if len(state.projectiles) <= 0 {
 		return
 	}
-	for i in len(state.projectiles) - 1 ..= 0 {
+	for i := len(state.projectiles) - 1; i >= 0; i -= 1 {
 		if state.projectiles[i].destroy == true {
 			unordered_remove(&state.projectiles, i)
 		}
@@ -178,7 +224,7 @@ update :: proc(using game: ^Game) {
 	if len(state.aliens) <= 0 {
 		return
 	}
-	for i in len(state.aliens) - 1 ..= 0 {
+	for i := len(state.aliens) - 1; i >= 0; i -= 1 {
 		if state.aliens[i].destroy == true {
 			unordered_remove(&state.aliens, i)
 		}
