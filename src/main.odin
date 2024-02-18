@@ -203,6 +203,14 @@ update :: proc(using game: ^Game) {
 
 	state.player.position += state.player.velocity
 
+
+	if state.player.position.x - 30 < 0 {
+		state.player.position.x = 30
+	}
+
+	if state.player.position.x > SCREEN_WIDTH - state.player.size.x - 15 {
+		state.player.position.x = SCREEN_WIDTH - state.player.size.x - 15
+	}
 	rect_collison :: proc(rect1: SDL.Rect, rect2: SDL.Rect) -> bool {
 		if rect1.x <= rect2.x + rect2.w &&
 		   rect1.x + rect1.w >= rect2.x &&
@@ -244,6 +252,7 @@ update :: proc(using game: ^Game) {
 			state.lives -= 1
 			if state.lives == 0 {
 				SDL.Quit()
+				os.exit(1)
 			}
 		}
 
@@ -291,7 +300,7 @@ update :: proc(using game: ^Game) {
 	alien_shoot :: proc(using game: ^Game, alien: Alien) {
 		projectile: Projectile =  {
 			{alien.position.x + alien.size.x / 2, alien.position.y + 10},
-			{0, 20},
+			{0, 10},
 			{5, 20},
 			false,
 		}
@@ -300,7 +309,7 @@ update :: proc(using game: ^Game) {
 
 	outer_alien: ^Alien
 
-	for alien in &state.aliens {
+	for &alien in &state.aliens {
 
 		if outer_alien == nil {
 			outer_alien = &alien
@@ -319,14 +328,12 @@ update :: proc(using game: ^Game) {
 
 	alien_move := state.alien_move_timer > ALIEN_MOVE_TIME
 
-	if outer_alien.position.x >= SCREEN_WIDTH - (ALIEN_SIZE + 30) ||
-	   outer_alien.position.x - ALIEN_SIZE - 30 <= 0 {
+	if outer_alien.position.x > SCREEN_WIDTH - (ALIEN_SIZE + 30) ||
+	   outer_alien.position.x - ALIEN_SIZE - 30 < 0 {
 		state.alien_move_direction = -state.alien_move_direction
 		state.alien_move_down = true
 	}
-	if state.alien_move_down do fmt.println(state.alien_move_down)
 	for alien in &state.aliens {
-		if state.alien_move_down do fmt.println(state.alien_move_down)
 
 		if alien.destroy == true {
 			continue

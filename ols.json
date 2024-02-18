@@ -10,5 +10,5 @@
 	"enable_hover": true,
 	"enable_snippets": true,
 	"enable_procedure_snippet": true,
-	"checker_args": "-vet -strict-style"
+	"checker_args": "src -vet -strict-style"
 }
