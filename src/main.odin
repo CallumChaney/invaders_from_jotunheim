@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import "core:math/rand"
 import "core:os"
 import SDL "vendor:sdl2"
