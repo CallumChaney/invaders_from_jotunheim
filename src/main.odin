@@ -2,13 +2,15 @@ package main
 
 import "core:fmt"
 import "core:math/rand"
+import "core:os"
 import SDL "vendor:sdl2"
 
 SCREEN_WIDTH :: 1280
 SCREEN_HEIGHT :: 720
 
 FPS :: 60
-FRAME_TIME :: 1000 / 60
+FRAME_DELAY :: 1000 / FPS
+FRAME_DELAY_SECS :: 1 / FPS
 
 
 SHIP_SPEED :: 10
@@ -17,11 +19,11 @@ ALIEN_SIZE :: 30
 
 ALIEN_GRID_COLS :: 6
 ALIEN_GRID_ROWS :: 6
-ALIEN_GRID_GAP :: 30
-ALIEN_GRID_VOFF :: SCREEN_WIDTH / 3
-ALIEN_GRID_HOFF :: 50
+ALIEN_GRID_GAP :: 60
+ALIEN_GRID_VOFF :: 50
+ALIEN_GRID_HOFF :: 512
 ALIEN_GRID_WIDTH :: ALIEN_GRID_COLS * (ALIEN_GRID_GAP + ALIEN_SIZE)
-
+ALIEN_MOVE_TIME :: 500
 
 NUM_SHIELDS :: 5
 
@@ -33,7 +35,7 @@ Entity :: struct {
 }
 
 Shield :: struct {
-	blocks: [36]Entity,
+	blocks: [dynamic]Entity,
 }
 
 Player :: distinct Entity
@@ -44,10 +46,14 @@ Game :: struct {
 	window:   ^SDL.Window,
 	renderer: ^SDL.Renderer,
 	state:    struct {
-		player:      Player,
-		projectiles: [dynamic]Projectile,
-		aliens:      [dynamic]Alien,
-		shields:     [dynamic]Shield,
+		player:               Player,
+		projectiles:          [dynamic]Projectile,
+		aliens:               [dynamic]Alien,
+		alien_move_timer:     u32,
+		alien_move_direction: i32,
+		alien_move_down:      bool,
+		shields:              [dynamic]Shield,
+		lives:                u8,
 	},
 }
 
@@ -65,11 +71,21 @@ main :: proc() {
 
 	game.state.player.size = {60, 60}
 
+	game.state.alien_move_direction = 1
+	game.state.lives = 3
 	for i: i32 = 0; i < 6; i += 1 {
 		for j: i32 = 0; j < 6; j += 1 {
 			append(
 				&game.state.aliens,
-				Alien{{512 + (60 * i), 50 + (60 * j)}, {0, 0}, {30, 30}, false},
+				Alien {
+					 {
+						ALIEN_GRID_HOFF + (ALIEN_GRID_GAP * i),
+						ALIEN_GRID_VOFF + (ALIEN_GRID_GAP * j),
+					},
+					{0, 0},
+					{ALIEN_SIZE, ALIEN_SIZE},
+					false,
+				},
 			)
 		}
 	}
@@ -81,12 +97,15 @@ main :: proc() {
 		for j: i32 = 0; j < 6; j += 1 {
 			for k: i32 = 0; k < 6; k += 1 {
 				idx := j + k * 6
-				shield.blocks[idx] =  {
-					{(10 * j) + 100 + (260 * i), SCREEN_HEIGHT - 200 + (10 * k)},
-					{0, 0},
-					{10, 10},
-					false,
-				}
+				append(
+					&shield.blocks,
+					Entity {
+						{(15 * j) + 100 + (260 * i), SCREEN_HEIGHT - 211 + (15 * k)},
+						{0, 0},
+						{15, 15},
+						false,
+					},
+				)
 			}
 		}
 
@@ -94,9 +113,9 @@ main :: proc() {
 	}
 
 
-	frame_start, frame_length: u32
+	frame_start, frame_time: u32
 
-	for {
+	for !SDL.QuitRequested() {
 		frame_start = SDL.GetTicks()
 
 		handle_input(&game)
@@ -105,10 +124,10 @@ main :: proc() {
 
 		render(&game)
 
-		frame_length = SDL.GetTicks() - frame_start
+		frame_time = SDL.GetTicks() - frame_start
 
-		if frame_length < FRAME_TIME {
-			SDL.Delay(FRAME_TIME - frame_length)
+		if frame_time < FRAME_DELAY {
+			SDL.Delay(FRAME_DELAY - frame_time)
 		}
 	}
 }
@@ -167,8 +186,8 @@ handle_input :: proc(using game: ^Game) {
 
 	player_shoot :: proc(using game: ^Game) {
 		projectile: Projectile =  {
-			{state.player.position.x + state.player.size.x / 2, state.player.position.y - 10},
-			{0, -50},
+			{state.player.position.x + state.player.size.x / 2, state.player.position.y - 1},
+			{0, -30},
 			{5, 20},
 			false,
 		}
@@ -183,7 +202,6 @@ update :: proc(using game: ^Game) {
 	}
 
 	state.player.position += state.player.velocity
-
 
 	rect_collison :: proc(rect1: SDL.Rect, rect2: SDL.Rect) -> bool {
 		if rect1.x <= rect2.x + rect2.w &&
@@ -200,11 +218,13 @@ update :: proc(using game: ^Game) {
 		if projectile.destroy == true {
 			continue
 		}
-		projectile.position += projectile.velocity
 
 		if projectile.position.y < 0 || projectile.position.y > SCREEN_HEIGHT {
 			projectile.destroy = true
 		}
+
+
+		projectile.position += projectile.velocity
 
 		if rect_collison(
 			    {
@@ -221,7 +241,10 @@ update :: proc(using game: ^Game) {
 			   },
 		   ) {
 			projectile.destroy = true
-			//state.player.destroy = true
+			state.lives -= 1
+			if state.lives == 0 {
+				SDL.Quit()
+			}
 		}
 
 		for alien in &state.aliens {
@@ -242,26 +265,98 @@ update :: proc(using game: ^Game) {
 				projectile.destroy = true
 			}
 		}
+
+		for shield in &state.shields {
+
+			for block in &shield.blocks {
+				if rect_collison(
+					    {
+						   projectile.position.x,
+						   projectile.position.y,
+						   projectile.size.x,
+						   projectile.size.y,
+					   },
+					   {block.position.x, block.position.y, block.size.x, block.size.y},
+				   ) {
+					block.destroy = true
+					projectile.destroy = true
+				}
+			}
+		}
+
+
 	}
+
 
 	alien_shoot :: proc(using game: ^Game, alien: Alien) {
 		projectile: Projectile =  {
 			{alien.position.x + alien.size.x / 2, alien.position.y + 10},
-			{0, 50},
+			{0, 20},
 			{5, 20},
 			false,
 		}
 		append(&state.projectiles, projectile)
 	}
 
+	outer_alien: ^Alien
 
 	for alien in &state.aliens {
+
+		if outer_alien == nil {
+			outer_alien = &alien
+			continue
+		}
+
+		if state.alien_move_direction < 0 {
+			if alien.position.x < outer_alien.position.x {
+				outer_alien = &alien
+				continue
+			}
+		} else if alien.position.x > outer_alien.position.x {
+			outer_alien = &alien
+		}
+	}
+
+	alien_move := state.alien_move_timer > ALIEN_MOVE_TIME
+
+	if outer_alien.position.x >= SCREEN_WIDTH - (ALIEN_SIZE + 30) ||
+	   outer_alien.position.x - ALIEN_SIZE - 30 <= 0 {
+		state.alien_move_direction = -state.alien_move_direction
+		state.alien_move_down = true
+	}
+	if state.alien_move_down do fmt.println(state.alien_move_down)
+	for alien in &state.aliens {
+		if state.alien_move_down do fmt.println(state.alien_move_down)
+
+		if alien.destroy == true {
+			continue
+		}
+		if alien_move {
+			if state.alien_move_down {
+				alien.position.y += ALIEN_SIZE
+			} else {
+				alien.position.x += ALIEN_SIZE * state.alien_move_direction
+			}
+		}
 		if rand.float32() < 0.0005 {
 			alien_shoot(game, alien)
 		}
 		if rand.float32() < 0.005 && abs(alien.position.x - state.player.position.x) < 50 {
 			alien_shoot(game, alien)
 		}
+	}
+
+	if alien_move {
+		state.alien_move_timer = 0
+		alien_move = false
+
+		if state.alien_move_down {
+			state.alien_move_down = false
+		}
+
+	} else {
+
+		state.alien_move_timer += FRAME_DELAY
 	}
 
 	if len(state.projectiles) <= 0 {
@@ -278,6 +373,18 @@ update :: proc(using game: ^Game) {
 	for i := len(state.aliens) - 1; i >= 0; i -= 1 {
 		if state.aliens[i].destroy == true {
 			unordered_remove(&state.aliens, i)
+		}
+	}
+
+
+	if len(state.shields) <= 0 {
+		return
+	}
+	for shield in &state.shields {
+		for i := len(shield.blocks) - 1; i >= 0; i -= 1 {
+			if shield.blocks[i].destroy == true {
+				unordered_remove(&shield.blocks, i)
+			}
 		}
 	}
 }
@@ -307,7 +414,7 @@ render :: proc(using game: ^Game) {
 	}
 
 	for alien in state.aliens {
-		SDL.SetRenderDrawColor(renderer, 45, 150, 69, 255)
+		SDL.SetRenderDrawColor(renderer, 145, 55, 50, 255)
 		SDL.RenderFillRect(
 			renderer,
 			&{alien.position.x, alien.position.y, alien.size.x, alien.size.y},
