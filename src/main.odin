@@ -4,7 +4,6 @@ import "core:fmt"
 import "core:math/rand"
 import SDL "vendor:sdl2"
 
-
 SCREEN_WIDTH :: 1280
 SCREEN_HEIGHT :: 720
 
@@ -12,11 +11,29 @@ FPS :: 60
 FRAME_TIME :: 1000 / 60
 
 
+SHIP_SPEED :: 10
+
+ALIEN_SIZE :: 30
+
+ALIEN_GRID_COLS :: 6
+ALIEN_GRID_ROWS :: 6
+ALIEN_GRID_GAP :: 30
+ALIEN_GRID_VOFF :: SCREEN_WIDTH / 3
+ALIEN_GRID_HOFF :: 50
+ALIEN_GRID_WIDTH :: ALIEN_GRID_COLS * (ALIEN_GRID_GAP + ALIEN_SIZE)
+
+
+NUM_SHIELDS :: 5
+
 Entity :: struct {
 	position: [2]i32,
 	velocity: [2]i32,
 	size:     [2]i32,
 	destroy:  bool,
+}
+
+Shield :: struct {
+	blocks: [36]Entity,
 }
 
 Player :: distinct Entity
@@ -30,13 +47,13 @@ Game :: struct {
 		player:      Player,
 		projectiles: [dynamic]Projectile,
 		aliens:      [dynamic]Alien,
+		shields:     [dynamic]Shield,
 	},
 }
 
 main :: proc() {
 	game := sdl_init()
 
-	assert(&game != nil, "Failed to create game")
 	defer {
 		delete(game.state.projectiles)
 		delete(game.state.aliens)
@@ -48,7 +65,34 @@ main :: proc() {
 
 	game.state.player.size = {60, 60}
 
-	append(&game.state.aliens, Alien{{SCREEN_WIDTH / 2, 150}, {0, 0}, {30, 30}, false})
+	for i: i32 = 0; i < 6; i += 1 {
+		for j: i32 = 0; j < 6; j += 1 {
+			append(
+				&game.state.aliens,
+				Alien{{512 + (60 * i), 50 + (60 * j)}, {0, 0}, {30, 30}, false},
+			)
+		}
+	}
+
+	for i: i32 = 0; i < NUM_SHIELDS; i += 1 {
+
+		shield: Shield
+
+		for j: i32 = 0; j < 6; j += 1 {
+			for k: i32 = 0; k < 6; k += 1 {
+				idx := j + k * 6
+				shield.blocks[idx] =  {
+					{(10 * j) + 100 + (260 * i), SCREEN_HEIGHT - 200 + (10 * k)},
+					{0, 0},
+					{10, 10},
+					false,
+				}
+			}
+		}
+
+		append(&game.state.shields, shield)
+	}
+
 
 	frame_start, frame_length: u32
 
@@ -88,11 +132,11 @@ sdl_init :: proc() -> (game: Game) {
 
 	game.renderer = SDL.CreateRenderer(game.window, -1, SDL.RENDERER_ACCELERATED)
 
+	assert(game.renderer != nil, SDL.GetErrorString())
+
 	return game
 }
 
-
-SHIP_SPEED :: 10
 
 handle_input :: proc(using game: ^Game) {
 	event: SDL.Event
@@ -142,10 +186,10 @@ update :: proc(using game: ^Game) {
 
 
 	rect_collison :: proc(rect1: SDL.Rect, rect2: SDL.Rect) -> bool {
-		if rect1.x < rect2.x + rect2.w &&
-		   rect1.x + rect1.w > rect2.x &&
-		   rect1.y < rect2.y + rect2.h &&
-		   rect1.y + rect1.h > rect2.y {
+		if rect1.x <= rect2.x + rect2.w &&
+		   rect1.x + rect1.w >= rect2.x &&
+		   rect1.y <= rect2.y + rect2.h &&
+		   rect1.y + rect1.h >= rect2.y {
 			return true
 		}
 
@@ -177,10 +221,14 @@ update :: proc(using game: ^Game) {
 			   },
 		   ) {
 			projectile.destroy = true
-			state.player.destroy = true
+			//state.player.destroy = true
 		}
 
 		for alien in &state.aliens {
+
+			if projectile.velocity.y > 0 {
+				continue
+			}
 			if rect_collison(
 				    {
 					   projectile.position.x,
@@ -208,7 +256,10 @@ update :: proc(using game: ^Game) {
 
 
 	for alien in &state.aliens {
-		if rand.float32() < 0.025 {
+		if rand.float32() < 0.0005 {
+			alien_shoot(game, alien)
+		}
+		if rand.float32() < 0.005 && abs(alien.position.x - state.player.position.x) < 50 {
 			alien_shoot(game, alien)
 		}
 	}
@@ -262,5 +313,16 @@ render :: proc(using game: ^Game) {
 			&{alien.position.x, alien.position.y, alien.size.x, alien.size.y},
 		)
 	}
+	for shield in state.shields {
+		SDL.SetRenderDrawColor(renderer, 10, 10, 10, 255)
+
+		for block in shield.blocks {
+			SDL.RenderFillRect(
+				renderer,
+				&{block.position.x, block.position.y, block.size.x, block.size.y},
+			)
+		}
+	}
+
 	SDL.RenderPresent(renderer)
 }
